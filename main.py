@@ -43,7 +43,7 @@ class Config:
 class Parser:
     """ Класс парсера Lenta.ru """
     @staticmethod
-    def get_main_news() -> list:
+    def get_main_news(max_news: int) -> list:
         """ Возвращает двумерный массив содержащий ссылки и названия главных новостей """
         # отпралвяет GET запрос на сайт и парсит содержимое блока "Главные новости"
         # пришлось прибегнуть к парсингу из-за того, что главные новости не выгружаются
@@ -58,7 +58,7 @@ class Parser:
         for total, post in enumerate(main_news_div_list):
             # если достигнут предел статей, который указан в CONFIG.INI -
             # останавливает цикл
-            if total >= int(config.main_news_limit):
+            if total >= int(max_news):
                 break
 
             # добавляет все полученные данные в двумерный массив, удаляет ненужные
@@ -70,7 +70,7 @@ class Parser:
         return main_news_sorted_list
 
     @staticmethod
-    def get_news_by_request(request: str):
+    def get_news_by_request(request: str, max_news: int):
         # создает заголовок со случайным user-agent`ом
         fake_agent = {'user_agent': UserAgent().random}
 
@@ -79,7 +79,7 @@ class Parser:
         # с помощью этого запроса можно получить неограниченное количество статей)
         r = requests.get('https://lenta.ru/search/v2/process', headers=fake_agent, params={
             'from': '0',
-            'size': str(config.search_responses_limit),
+            'size': str(max_news),
             'sort': '2',
             'title_only': '1',
             'domain': '1',
@@ -118,7 +118,7 @@ def main():
             bot.send_message(message.from_user.id, '📡 *Поиск статей на ресурсе ...*', parse_mode='Markdown')
 
             construct_message = f'📮 Главные новости *Lenta.ru*\n{" " * 6}_(Названия статей кликабельны)_\n\n'
-            for index, post in enumerate(Parser.get_main_news()):
+            for index, post in enumerate(Parser.get_main_news(config.main_news_limit)):
                 construct_message += f'{index + 1}) [{post[0]}]({post[1]})\n\n'
 
             bot.send_message(message.from_user.id, construct_message,
@@ -139,8 +139,8 @@ def main():
 
         construct_message = f'''📮 Найденные статьи на *Lenta.ru*
 {" " * 6}_(Названия статей кликабельны)_\n\n'''
-        if len(Parser.get_news_by_request(message.text)) != 0:
-            for index, post in enumerate(Parser.get_news_by_request(message.text)):
+        if len(Parser.get_news_by_request(message.text, config.main_news_limit)) != 0:
+            for index, post in enumerate(Parser.get_news_by_request(message.text, config.main_news_limit)):
                 construct_message += f'{index + 1}) [{post[0]}]({post[1]})\n\n'
 
             bot.send_message(message.from_user.id, construct_message,
