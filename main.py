@@ -1,6 +1,7 @@
 from fake_useragent import UserAgent
 from configparser import ConfigParser
 from bs4 import BeautifulSoup
+from keyboa import keyboa_maker
 import lxml
 import requests
 import telebot
@@ -70,7 +71,7 @@ class Parser:
         return main_news_sorted_list
 
     @staticmethod
-    def get_news_by_request(request: str, max_news: int):
+    def get_news_by_request(request: str, max_news: int) -> list:
         # создает заголовок со случайным user-agent`ом
         fake_agent = {'user_agent': UserAgent().random}
 
@@ -87,44 +88,75 @@ class Parser:
         })
 
         # двумерный массив, состоящий из заголовка статьи и ссылки
-        responses = list()
+        found_articles = list()
 
         # добавление в двумерный массив кортежи с заголовком и ссылкой статьи
         for post in r.json()['matches']:
-            responses.append((post['title'], post['url']))
+            found_articles.append((post['title'], post['rightcol'], post['url']))
 
-        return responses
+        return found_articles
 
 
 def main():
     """ Функционал Telegram бота """
+    global received_data, page
+
+    def found_articles_inline(article_url: str) -> str:
+        """ Создает Inline клавиатуру новостей по запросу с указанной для кнопки чтения ссылкой """
+        return telebot.types.InlineKeyboardMarkup().row(
+            telebot.types.InlineKeyboardButton(text='🔙', callback_data='found_articles_left'),
+            telebot.types.InlineKeyboardButton(text='📓 Read', callback_data='found_articles_read', url=article_url),
+            telebot.types.InlineKeyboardButton(text='🔜', callback_data='found_articles_right')
+        )
+
+    def main_news_inline(article_url: str) -> str:
+        """ Создает Inline клавиатуру главных новостей с указанной для кнопки чтения ссылкой """
+        return telebot.types.InlineKeyboardMarkup().row(
+            telebot.types.InlineKeyboardButton(text='🔙', callback_data='main_news_left'),
+            telebot.types.InlineKeyboardButton(text='📓 Read', callback_data='main_news_read', url=article_url),
+            telebot.types.InlineKeyboardButton(text='🔜', callback_data='main_news_right')
+        )
+
     # создание клавиатуры навигации по функционалу бота
     menu_keyboard = telebot.types.ReplyKeyboardMarkup(True, False)  # создание ReplyMarkup клавиатуры
 
-    menu_keyboard.row('☑ ️Главные новости')  # добавление шаблона для поиска главных новостей
+    menu_keyboard.row('☑ Главные новости')  # добавление шаблона для поиска главных новостей
     menu_keyboard.row('👁‍🗨 Поиск новостей')  # добавление шаблона для поиска новостей, введенных пользователем
+
+    def create_page_nav(data: list, input_page: int) -> dict:
+        """ Возвращает результат постраничной навигации """
+        list_to_dict = dict()
+
+        # конвертирование list в dict
+        for index, element in enumerate(data):
+            list_to_dict[index + 1] = element
+
+        return list_to_dict[input_page]
 
     @bot.message_handler(commands=['start'])
     def start_message(message):
         """ Вывод стартового сообщения """
         bot.send_message(message.chat.id, '''👁‍🗨 Поиск новостей | *Lenta.ru*\n
 Этот бот предназначен для поиска новостей на сайте *Lenta.ru*.
-Используйте клавиатуру Telegram\`а для навигации по функционалу бота''', parse_mode='Markdown', reply_markup=menu_keyboard)
+Используйте клавиатуру Telegram\`а для навигации по функционалу бота''',
+                         parse_mode='Markdown', reply_markup=menu_keyboard)
 
     @bot.message_handler(content_types=['text'])
-    def main_news_func(message):
+    def parsing_mode(message):
         """ Ответ на выбор функции бота н ReplyMarkup клавиатуре """
-        if message.text == '☑ ️Главные новости':
+        global received_data, page
+        if message.text == '☑ Главные новости':
+            page = 1
             bot.send_message(message.from_user.id, '📡 *Поиск статей на ресурсе ...*', parse_mode='Markdown')
 
-            construct_message = f'📮 Главные новости *Lenta.ru*\n{" " * 6}_(Названия статей кликабельны)_\n\n'
-            for index, post in enumerate(Parser.get_main_news(config.main_news_limit)):
-                construct_message += f'{index + 1}) [{post[0]}]({post[1]})\n\n'
+            received_data = Parser.get_main_news(config.main_news_limit)
+            construct_message = f'📮 *{received_data[page - 1][0]}*\n\n\n📃 Страница: {page}/{len(received_data)}'
 
             bot.send_message(message.from_user.id, construct_message,
-                             parse_mode='Markdown', disable_web_page_preview=True)
+                             parse_mode='Markdown', reply_markup=main_news_inline(received_data[page - 1][1]))
 
         elif message.text == '👁‍🗨 Поиск новостей':
+            page = 1
             msg = bot.send_message(message.from_user.id, '🎙 *Введите название статьи*', parse_mode='Markdown')
 
             # ожидает от пользователя ответ
@@ -135,25 +167,87 @@ def main():
 
     def searched_news_response(message):
         """ Вызывается после поискового запроса пользователя. Ищет статьи по запросу на ресурсе """
+        global received_data
+
         bot.send_message(message.from_user.id, '📡 *Поиск статей на ресурсе ...*', parse_mode='Markdown')
+        received_data = Parser.get_news_by_request(message.text, config.main_news_limit)
 
-        construct_message = f'''📮 Найденные статьи на *Lenta.ru*
-{" " * 6}_(Названия статей кликабельны)_\n\n'''
-        if len(Parser.get_news_by_request(message.text, config.main_news_limit)) != 0:
-            for index, post in enumerate(Parser.get_news_by_request(message.text, config.main_news_limit)):
-                construct_message += f'{index + 1}) [{post[0]}]({post[1]})\n\n'
+        if len(received_data) == 0:
+            bot.send_message(message.from_user.id,
+                '❌ *Ни одной статьи по вашему поисковому запросу не было найдено*', parse_mode='Markdown')
+            return
 
-            bot.send_message(message.from_user.id, construct_message,
-                parse_mode='Markdown', disable_web_page_preview=True)
+        data_for_message = create_page_nav(received_data, page)
 
-        else:
-            bot.send_message(message.from_user.id, '❌ *Ни одной статьи по вашему поисковому запросу не было найдено*',
-                             parse_mode='Markdown')
+        construct_message = f'''📮 *{data_for_message[0]}*
+\n_— {data_for_message[1]}_\n\n\n📃 Страница: {page}/{len(received_data)}'''
 
-    bot.polling(none_stop=False)
+        bot.send_message(message.from_user.id, construct_message, parse_mode='Markdown',
+                         disable_web_page_preview=True, reply_markup=found_articles_inline(data_for_message[2]))
+
+    @bot.callback_query_handler(func=lambda call: call.data in ['found_articles_left', 'found_articles_right'])
+    def found_articles_page_navigation(call):
+        """ Постраничная навигация """
+        global page, received_data
+
+        if call.data == 'found_articles_left':
+            if page == 1:
+                page = len(received_data)
+            else:
+                page -= 1
+
+        elif call.data == 'found_articles_right':
+            if page == len(received_data):
+                page = 1
+            else:
+                page += 1
+
+        try:
+
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                  text=f'''📮 *{create_page_nav(received_data, page)[0]}*
+\n_— {create_page_nav(received_data, page)[1]}_\n\n
+📃 Страница: {page}/{len(received_data)}''',
+                                  parse_mode='Markdown', reply_markup=found_articles_inline(received_data[page - 1][2]))
+        except telebot.apihelper.ApiException:
+            pass
+
+        bot.answer_callback_query(call.id)
+
+    @bot.callback_query_handler(func=lambda call: call.data in ['main_news_left', 'main_news_right'])
+    def main_news_page_navigation(call):
+        """ Постраничная навигация """
+        global page, received_data
+
+        if call.data == 'main_news_left':
+            if page == 1:
+                page = len(received_data)
+            else:
+                page -= 1
+
+        elif call.data == 'main_news_right':
+            if page == len(received_data):
+                page = 1
+            else:
+                page += 1
+
+        try:
+            bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
+                                  text=f'''📮 *{create_page_nav(received_data, page)[0]}*
+\n\n📃 Страница: {page}/{len(received_data)}''',
+                                  parse_mode='Markdown', reply_markup=main_news_inline(received_data[page - 1][1]))
+        except telebot.apihelper.ApiException:
+            pass
+
+        bot.answer_callback_query(call.id)
+
+    bot.polling(none_stop=True)
 
 
 if __name__ == '__main__':
+    page = 1  # стартовая страница
+    received_data = 'None'  # имеющиеся на данный момент данные
+
     # создает все необходимые экземпляры
     config = Config()
     bot = telebot.TeleBot(config.token)
