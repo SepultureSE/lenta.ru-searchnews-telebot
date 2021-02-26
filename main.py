@@ -2,6 +2,8 @@ from fake_useragent import UserAgent
 from configparser import ConfigParser
 from bs4 import BeautifulSoup
 from keyboa import keyboa_maker
+from datetime import datetime
+import sqlite3
 import lxml
 import requests
 import telebot
@@ -39,6 +41,78 @@ class Config:
         # создает конфиг. файл и заполняет его секциями
         with open(self.default_config_name, 'w') as config_file:
             self.__config.write(config_file)
+
+
+class Database:
+    """ Класс для управления БД """
+    def __init__(self):
+        self.__connection = sqlite3.connect('data.sqlite', check_same_thread=False)
+        self.__cursor = self.__connection.cursor()
+        self.__create_database()
+
+    def __create_database(self):
+        """ Создает базу данных """
+        self.__cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+            telegram_id INTEGER,
+            username TEXT,
+            start_time TEXT
+        );''')
+        self.__connection.commit()
+
+        self.__cursor.execute('''CREATE TABLE IF NOT EXISTS requests (
+            telegram_id INTEGER,
+            start_time TEXT,
+            request_type TEXT,
+            request_data TEXT
+        );''')
+        self.__connection.commit()
+
+    def add_user(self, telegram_id: int, username: str, start_time: datetime) -> int:
+        """ Добавить пользователя в таблицу """
+        self.__cursor.execute(f'SELECT telegram_id FROM users WHERE telegram_id={telegram_id};')
+
+        if self.__cursor.fetchone() is None:
+            self.__cursor.execute('INSERT INTO users VALUES (?, ?, ?);', (telegram_id, username, start_time))
+            self.__connection.commit()
+            return 1
+        else:
+            return 0
+
+    def get_all_users(self) -> list:
+        """ Возвращает двумерный массив с данными всех пользователей """
+        self.__cursor.execute('SELECT * FROM users;')
+        return self.__cursor.fetchall()
+
+    def get_specific_user(self, telegram_id: int) -> tuple:
+        """ Возвращает одномерный массив с данными пользователя """
+        self.__cursor.execute(f'SELECT * FROM users WHERE telegram_id={telegram_id};')
+        return self.__cursor.fetchone()
+
+    def update_username(self, telegram_id: int, username: str) -> None:
+        """ Изменяет юзернейм пользователя на более новый """
+        self.__cursor.execute(f'UPDATE users SET username="{username}" WHERE telegram_id={telegram_id};')
+        self.__connection.commit()
+
+    def add_request(self, telegram_id: int, start_time: datetime, request_type: str, request_data: str) -> None:
+        """ Добавляет запись с новым запросом """
+        self.__cursor.execute(f'INSERT INTO requests VALUES (?, ?, ?, ?);',
+                              (telegram_id, start_time, request_type, request_data))
+        self.__connection.commit()
+
+    def get_all_requests(self) -> list:
+        """ Возващает двумерный массив со всеми запросами """
+        self.__cursor.execute(f'SELECT * FROM requests;')
+        return self.__cursor.fetchall()
+
+    def get_main_requests(self) -> list:
+        """ Возвращает двумерный массив главных запросов """
+        self.__cursor.execute(f'SELECT * FROM requests WHERE request_type="main_news";')
+        return self.__cursor.fetchall()
+
+    def get_searched_requests(self) -> list:
+        """ Возвращает двумерный массив запросов по поиску """
+        self.__cursor.execute(f'SELECT * FROM requests WHERE request_type="news_by_request";')
+        return self.__cursor.fetchall()
 
 
 class Parser:
@@ -136,6 +210,8 @@ def main():
     @bot.message_handler(commands=['start'])
     def start_message(message):
         """ Вывод стартового сообщения """
+        db.add_user(message.from_user.id, message.from_user.username, datetime.now())
+
         bot.send_message(message.chat.id, '''👁‍🗨 Поиск новостей | *Lenta.ru*\n
 Этот бот предназначен для поиска новостей на сайте *Lenta.ru*.
 Используйте клавиатуру Telegram\`а для навигации по функционалу бота''',
@@ -145,6 +221,9 @@ def main():
     def parsing_mode(message):
         """ Ответ на выбор функции бота н ReplyMarkup клавиатуре """
         global received_data, page
+
+        db.update_username(message.from_user.id, message.from_user.username)
+
         if message.text == '☑ Главные новости':
             page = 1
             bot.send_message(message.from_user.id, '📡 *Поиск статей на ресурсе ...*', parse_mode='Markdown')
@@ -203,7 +282,6 @@ def main():
                 page += 1
 
         try:
-
             bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id,
                                   text=f'''📮 *{create_page_nav(received_data, page)[0]}*
 \n_— {create_page_nav(received_data, page)[1]}_\n\n
@@ -251,6 +329,7 @@ if __name__ == '__main__':
     # создает все необходимые экземпляры
     config = Config()
     bot = telebot.TeleBot(config.token)
+    db = Database()
 
     # запускает основной код бота
     main()
