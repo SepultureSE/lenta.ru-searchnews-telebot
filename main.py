@@ -225,6 +225,8 @@ def main():
         db.update_username(message.from_user.id, message.from_user.username)
 
         if message.text == '☑ Главные новости':
+            db.add_request(message.from_user.id, datetime.now(), 'main_news', 'null')
+
             page = 1
             bot.send_message(message.from_user.id, '📡 *Поиск статей на ресурсе ...*', parse_mode='Markdown')
 
@@ -247,6 +249,8 @@ def main():
     def searched_news_response(message):
         """ Вызывается после поискового запроса пользователя. Ищет статьи по запросу на ресурсе """
         global received_data
+
+        db.add_request(message.from_user.id, datetime.now(), 'main_news', message.text)
 
         bot.send_message(message.from_user.id, '📡 *Поиск статей на ресурсе ...*', parse_mode='Markdown')
         received_data = Parser.get_news_by_request(message.text, config.main_news_limit)
