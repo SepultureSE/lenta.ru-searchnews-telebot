@@ -41,3 +41,16 @@ ax.set_xlabel('Days')
 ax.set_xticks(labels_position)
 ax.set_xticklabels(week_array_names)        # X-axis names
 ax.grid(axis='x')
+
+
+
+fig, ax = plt.subplots(figsize=(10, 7), subplot_kw=dict(aspect="equal"), dpi=300)
+labels= ['Main requests','Searched requests']
+data = [len(db.get_main_requests()) , len(db.get_searched_requests())]
+
+wedges, texts, autotext = ax.pie(data, wedgeprops=dict(width=0.5), startangle=135, autopct='%1.1f%%', textprops=dict(color="w", fontsize=10, ha="center", weight='bold'))
+plt.legend(labels, loc='lower right')
+
+plt.figtext(0.69, 0.205, 'Author\'s channel: @regular_patty', ha="center", fontsize=7)
+ax.set_title("Main/searched requests", weight="bold", fontsize=18)
+plt.show()
